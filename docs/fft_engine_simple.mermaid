@@ -1,0 +1,46 @@
+flowchart LR
+
+  IN["<b>Radar samples come in</b><br/>one every clock tick"]
+
+  subgraph ENGINE["THE FFT ENGINE"]
+    direction LR
+
+    B1["<b>1. Waiting room</b><br/>a small holding spot<br/>so no sample is lost<br/>if things get busy"]
+
+    STOP{{"<b>2. Stop sign</b><br/>holds samples back<br/>while the size<br/>is being changed"}}
+
+    SET["<b>Settings clerk</b><br/>tells the maths block<br/>1024 or 2048 points<br/>only between frames"]
+
+    FFT["<b>3. The maths</b><br/>Xilinx FFT core<br/>turns time into frequency<br/>1 sample in, 1 bin out"]
+
+    BIN["<b>Bin emptier</b><br/>keeps clearing the<br/>core's little report box<br/>so it never clogs up"]
+
+    B2["<b>4. Waiting room</b><br/>same idea, on the<br/>way out"]
+
+    B1 --> STOP --> FFT --> B2
+    SET -.-> STOP
+    SET -.-> FFT
+    FFT -.-> BIN
+  end
+
+  OUT["<b>Results go out</b><br/>one frequency bin per tick<br/>+ a scale number attached<br/>to each one"]
+
+  IN --> B1
+  B2 --> OUT
+
+  NOTE["<b>Important</b><br/>The results still have<br/>direction information in them.<br/>Do NOT square them here —<br/>the Doppler and angle stages<br/>need that direction."]
+  OUT -.-> NOTE
+
+  classDef io    fill:#f3f4f6,stroke:#666666,stroke-width:1.5px,color:#1a1a1a
+  classDef buf   fill:#dbeafe,stroke:#0b5394,stroke-width:2px,color:#1a1a1a
+  classDef core  fill:#ffffff,stroke:#0b5394,stroke-width:3px,color:#1a1a1a
+  classDef help  fill:#fef3c7,stroke:#b8860b,stroke-width:1.5px,color:#1a1a1a
+  classDef stopc fill:#e9d5ff,stroke:#6b21a8,stroke-width:1.5px,color:#1a1a1a
+  classDef warn  fill:#fee2e2,stroke:#8b1a1a,stroke-width:1.5px,color:#1a1a1a
+
+  class IN,OUT io
+  class B1,B2 buf
+  class FFT core
+  class SET,BIN help
+  class STOP stopc
+  class NOTE warn

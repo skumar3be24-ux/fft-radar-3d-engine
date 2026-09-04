@@ -1,0 +1,71 @@
+flowchart LR
+
+  %% ================= PORTS IN =================
+  SIN["<b>s_axis</b><br/>tdata[31:0] = {Q,I} Q1.15<br/>tvalid / tready / tlast"]
+  NSEL["<b>nfft_sel_i</b><br/>0 = 1024<br/>1 = 2048"]
+
+  %% ================= ENGINE =================
+  subgraph TOP["fft_engine_top &nbsp;·&nbsp; generate × NUM_LANES"]
+    direction LR
+
+    subgraph LANE["fft_lane [L]"]
+      direction TB
+
+      SK1["<b>axis_skid</b> (in)<br/>DW=32 UW=1<br/>latency 1 · full rate<br/><i>breaks tready path</i>"]
+
+      FA["<b>frame_active</b> tracker<br/>set on first beat<br/>clear on tlast<br/><i>fences config writes</i>"]
+
+      CFG["<b>fft_config_fsm</b><br/>re-arms on nfft change<br/>issues only between frames<br/>CFG_W = 16"]
+
+      GATE{{"gate<br/>tvalid &amp; ~gate_input<br/>tready &amp; ~gate_input"}}
+
+      XF["<b>xfft_0</b> &nbsp;v9.1<br/>Pipelined Streaming<br/>radix-2² · BFP · Q1.15<br/>convergent rounding<br/>natural order<br/><br/>24 DSP48E1 · 18 RAMB18<br/>latency ≈ 2N"]
+
+      STAT["<b>fft_status_capture</b><br/>tready tied HIGH<br/><i>prevents the frame-2<br/>assertion (bug #4)</i>"]
+
+      SK2["<b>axis_skid</b> (out)<br/>DW=32 UW=8<br/>carries BLK_EXP on TUSER"]
+
+      %% data path
+      SK1 -->|"si_tdata / tvalid<br/>tlast"| GATE
+      GATE -->|"s_axis_data"| XF
+      XF -->|"m_axis_data_tdata[31:0]<br/>+ tuser[7:0] = BLK_EXP"| SK2
+
+      %% control path
+      SK1 -.->|"in_fire, si_tlast"| FA
+      FA -.->|"frame_active"| CFG
+      CFG -.->|"s_axis_config_tdata[15:0]<br/>NFFT[4:0] · FWD_INV[8]"| XF
+      CFG -.->|"gate_input"| GATE
+
+      %% status path
+      XF -.->|"m_axis_status_tdata[7:0]"| STAT
+    end
+  end
+
+  %% ================= PORTS OUT =================
+  MOUT["<b>m_axis</b><br/>tdata[31:0] = {Im,Re} Q1.15<br/><b>tuser[7:0] = BLK_EXP</b><br/>tvalid / tready / tlast"]
+  DBG["<b>status</b><br/>nfft_applied_o[4:0]<br/>busy_o<br/>blk_exp_dbg_o[7:0]"]
+
+  SIN --> SK1
+  NSEL -.-> CFG
+  SK2 --> MOUT
+  STAT -.-> DBG
+  CFG -.-> DBG
+
+  %% ================= NOTE =================
+  NOTE["<b>Emits COMPLEX bins, not magnitude.</b><br/>Squaring here would destroy phase and make<br/>the block unusable by Doppler and AoA.<br/>Magnitude belongs to output processing."]
+  MOUT -.-> NOTE
+
+  %% ================= STYLE =================
+  classDef port  fill:#f3f4f6,stroke:#666666,stroke-width:1.5px,color:#1a1a1a
+  classDef data  fill:#dbeafe,stroke:#0b5394,stroke-width:2px,color:#1a1a1a
+  classDef ip    fill:#ffffff,stroke:#0b5394,stroke-width:2.5px,color:#1a1a1a
+  classDef ctrl  fill:#fef3c7,stroke:#b8860b,stroke-width:1.5px,color:#1a1a1a
+  classDef gatec fill:#e9d5ff,stroke:#6b21a8,stroke-width:1.5px,color:#1a1a1a
+  classDef noted fill:#fee2e2,stroke:#8b1a1a,stroke-width:1.5px,color:#1a1a1a
+
+  class SIN,NSEL,MOUT,DBG port
+  class SK1,SK2 data
+  class XF ip
+  class CFG,FA,STAT ctrl
+  class GATE gatec
+  class NOTE noted

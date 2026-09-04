@@ -1,0 +1,58 @@
+flowchart TB
+
+  %% ================= SYSTEM CHAIN =================
+  subgraph CHAIN["3-D Radar Chain &nbsp;—&nbsp; FFT → CTM → FFT → CTM → FFT"]
+    direction LR
+    ADC["ADC input<br/>4 RX channels<br/>complex Q1.15"]
+    PP["input ping-pong<br/>buffer"]
+    WIN["window<br/>Hann / BH4"]
+    F1["<b>FFT ENGINE</b><br/>axis 1 · range<br/>N = 1024 / 2048"]
+    C1["CTM 1<br/>transpose<br/>range × chirp"]
+    F2["<b>FFT ENGINE</b><br/>axis 2 · Doppler<br/>N = 256"]
+    C2["CTM 2<br/>transpose<br/>→ antenna"]
+    F3["angle FFT<br/>parallel butterfly<br/>N = 4 · zero DSP"]
+    MAG["magnitude<br/>Re² + Im²"]
+    CF["CFAR<br/>detection"]
+    DMA["AXI DMA<br/>→ DDR"]
+
+    ADC --> PP --> WIN --> F1 --> C1 --> F2 --> C2 --> F3 --> MAG --> CF --> DMA
+  end
+
+  %% ================= EXPONENT PATH =================
+  EXP["exponent accumulator<br/>true scale = 2^(E1+E2)<br/><i>miss this and magnitude<br/>is wrong by orders of magnitude</i>"]
+  F1 -. "BLK_EXP₁ on TUSER" .-> EXP
+  F2 -. "BLK_EXP₂ on TUSER" .-> EXP
+  EXP -.-> MAG
+
+  %% ================= ENGINE INTERNALS =================
+  subgraph ENG["FFT ENGINE internals &nbsp;—&nbsp; one instance per axis, different IP build"]
+    direction LR
+    SI["axis_skid<br/>in<br/><i>breaks tready path</i>"]
+    CFG["fft_config_fsm<br/>runtime N<br/>frame-fenced"]
+    XF["xfft v9.1<br/>Pipelined Streaming<br/>radix-2² · BFP<br/>24 DSP · 18 RAMB18"]
+    ST["fft_status_capture<br/>drains status<br/><i>owns tready</i>"]
+    SO["axis_skid<br/>out<br/>+ TUSER carry"]
+
+    SI --> XF --> SO
+    CFG -. "config word" .-> XF
+    XF -. "status" .-> ST
+  end
+
+  F1 -.->|"expanded below"| ENG
+
+  %% ================= INTERFACE CONTRACT =================
+  IF["<b>Interface contract</b><br/>in : 32b {Q,I} Q1.15 · TLAST on sample N−1<br/>out: 32b {Im,Re} Q1.15 · TUSER = BLK_EXP<br/>full backpressure · both boundaries registered"]
+  ENG -.-> IF
+
+  %% ================= OWNERSHIP =================
+  classDef mine   fill:#dbeafe,stroke:#0b5394,stroke-width:2px,color:#1a1a1a
+  classDef mate   fill:#fef3c7,stroke:#b8860b,stroke-width:1.5px,color:#1a1a1a
+  classDef gone   fill:#fee2e2,stroke:#8b1a1a,stroke-width:1.5px,stroke-dasharray:4 3,color:#1a1a1a
+  classDef other  fill:#f3f4f6,stroke:#888888,stroke-width:1px,color:#1a1a1a
+  classDef info   fill:#ffffff,stroke:#0b5394,stroke-width:1px,color:#333333
+
+  class F1,F2,SI,CFG,XF,ST,SO mine
+  class C1,C2 mate
+  class WIN,F3,CF,EXP gone
+  class ADC,PP,MAG,DMA other
+  class IF info
